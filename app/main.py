@@ -1,20 +1,29 @@
 from datetime import datetime
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import FastAPI, Response
 from sqlalchemy import text
 
 from app.database import AsyncSessionLocal
+from app.api import recordings
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan events for the FastAPI application."""
     # Startup
-    print("Starting AudioInsight service...")
+    logger.info("Starting AudioInsight service...")
     yield
     # Shutdown
-    print("Shutting down AudioInsight service...")
+    logger.info("Shutting down AudioInsight service...")
 
 
 app = FastAPI(
@@ -23,6 +32,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan
 )
+
+# Register routers
+app.include_router(recordings.router)
 
 
 @app.get("/health")
