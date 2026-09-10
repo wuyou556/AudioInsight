@@ -40,7 +40,7 @@ def upgrade() -> None:
         sa.Column('recording_id', postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column('status', sa.String(length=50), nullable=False),
         sa.Column('transcript', sa.Text(), nullable=True),
-        sa.Column('summary_json', sa.Text(), nullable=True),
+        sa.Column('summary_json', postgresql.JSONB(), nullable=True),
         sa.Column('error_message', sa.Text(), nullable=True),
         sa.Column('retry_count', sa.Integer(), nullable=False),
         sa.Column('created_at', sa.DateTime(), nullable=False),

@@ -1,7 +1,7 @@
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from sqlalchemy import text
 
 from app.database import AsyncSessionLocal
@@ -26,7 +26,7 @@ app = FastAPI(
 
 
 @app.get("/health")
-async def health_check():
+async def health_check(response: Response):
     """Health check endpoint that verifies database connectivity."""
     try:
         async with AsyncSessionLocal() as session:
@@ -40,6 +40,7 @@ async def health_check():
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:
+        response.status_code = 503
         return {
             "status": "unhealthy",
             "database": "disconnected",
