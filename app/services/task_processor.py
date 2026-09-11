@@ -1,8 +1,10 @@
 """Task processor for handling background transcription and summarization."""
 import asyncio
 import logging
+import os
 from uuid import UUID
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
@@ -25,18 +27,17 @@ async def process_task(task_id: UUID):
     task = None  # P0-1: Initialize to avoid unbound variable in exception handler
     async with AsyncSessionLocal() as db:
         try:
-            # Get task and recording
+            # P2-6: Get task and recording with eager loading (avoid N+1 query)
             result = await db.execute(
-                select(Task).where(Task.id == task_id)
+                select(Task)
+                .options(selectinload(Task.recording))
+                .where(Task.id == task_id)
             )
             task = result.scalar_one_or_none()
 
             if not task:
                 logger.error(f"Task {task_id} not found")
                 return
-
-            # Get recording file path
-            await db.refresh(task, ["recording"])
 
             # P0-3: Check if recording exists after refresh
             if not task.recording:
@@ -48,6 +49,14 @@ async def process_task(task_id: UUID):
 
             file_path = task.recording.file_path
 
+            # P2-8: Verify file exists on disk before processing
+            if not os.path.exists(file_path):
+                logger.error(f"Task {task_id}: File not found on disk: {file_path}")
+                task.status = "failed"
+                task.error_message = f"Audio file not found: {file_path}"
+                await db.commit()
+                return
+
             # Update status to transcribing
             task.status = "transcribing"
             await db.commit()
@@ -57,7 +66,7 @@ async def process_task(task_id: UUID):
             try:
                 transcript = await mock_transcribe(file_path)
 
-                # Save transcript and update status to done
+                # P1: Save transcript and update status to done (include commit in try)
                 task.transcript = transcript
                 task.status = "done"
                 task.error_message = None
@@ -65,7 +74,7 @@ async def process_task(task_id: UUID):
                 logger.info(f"Task {task_id} completed successfully")
 
             except Exception as e:
-                # Transcription failed
+                # P1: Transcription or commit failed
                 task.status = "failed"
                 task.error_message = str(e)
                 await db.commit()

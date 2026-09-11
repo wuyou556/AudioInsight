@@ -160,8 +160,13 @@ async def upload_recording(
         f"filename={file.filename}, file_size={file_size}"
     )
 
-    # Schedule background task processing
-    schedule_task(task.id)
+    # P2-5: Schedule background task processing with error handling
+    try:
+        schedule_task(task.id)
+    except Exception as e:
+        # Log scheduling error but don't fail the upload
+        # The upload succeeded, task can be retried manually
+        logger.error(f"Failed to schedule task {task.id}: {e}")
 
     return RecordingUploadResponse(
         recording_id=recording.id,
