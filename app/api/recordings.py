@@ -3,14 +3,23 @@ import os
 import uuid
 import logging
 from pathlib import Path
+from typing import Optional
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.models import Recording, Task
-from app.schemas import RecordingUploadResponse, RecordingDetailResponse, LatestTaskInfo, ErrorResponse
+from app.schemas import (
+    RecordingUploadResponse,
+    RecordingDetailResponse,
+    RecordingListResponse,
+    RecordingListItem,
+    LatestTaskInfo,
+    ErrorResponse
+)
 from app.config import settings
 from app.services.task_processor import schedule_task
 
@@ -25,6 +34,82 @@ MIME_TYPE_MAP = {
     ".m4a": "audio/mp4",
     ".aac": "audio/aac"
 }
+
+
+@router.get(
+    "",
+    response_model=RecordingListResponse,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid parameters"}
+    },
+    summary="List recordings with pagination",
+    description="Get a paginated list of recordings ordered by creation time (newest first)"
+)
+async def list_recordings(
+    page: int = Query(1, ge=1, description="Page number (starting from 1)"),
+    page_size: int = Query(20, ge=1, le=100, description="Number of items per page (max 100)"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    List recordings with pagination.
+
+    Returns:
+    - items: List of recording items with latest task status
+    - total: Total number of recordings
+    - page: Current page number
+    - page_size: Items per page
+
+    Each recording item includes:
+    - recording_id: UUID of the recording
+    - filename: Original filename
+    - file_size: File size in bytes
+    - created_at: Creation timestamp
+    - latest_status: Status of the latest task (if any)
+    """
+    # Calculate offset
+    offset = (page - 1) * page_size
+
+    # Get total count
+    count_result = await db.execute(
+        select(func.count(Recording.id))
+    )
+    total = count_result.scalar()
+
+    # Get recordings ordered by created_at DESC (uses idx_recordings_created_at)
+    recordings_result = await db.execute(
+        select(Recording)
+        .order_by(Recording.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
+    recordings = recordings_result.scalars().all()
+
+    # Build response items
+    items = []
+    for recording in recordings:
+        # Get latest task status for this recording
+        task_result = await db.execute(
+            select(Task.status)
+            .where(Task.recording_id == recording.id)
+            .order_by(Task.created_at.desc())
+            .limit(1)
+        )
+        latest_status = task_result.scalar_one_or_none()
+
+        items.append(RecordingListItem(
+            recording_id=recording.id,
+            filename=recording.filename,
+            file_size=recording.file_size,
+            created_at=recording.created_at,
+            latest_status=latest_status
+        ))
+
+    return RecordingListResponse(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size
+    )
 
 
 @router.post(

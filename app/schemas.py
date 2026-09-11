@@ -96,3 +96,23 @@ class RecordingDetailResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class RecordingListItem(BaseModel):
+    """Recording list item with latest task status."""
+    recording_id: UUID
+    filename: str
+    file_size: int
+    created_at: datetime
+    latest_status: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RecordingListResponse(BaseModel):
+    """Response for GET /v1/recordings with pagination."""
+    items: list[RecordingListItem]
+    total: int
+    page: int
+    page_size: int
