@@ -11,11 +11,34 @@ from app.database import AsyncSessionLocal
 from app.models import Task
 from app.services.transcription import mock_transcribe
 from app.services.summarization import llm_summarize
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 # Background task registry to keep track of running tasks
 _background_tasks = set()
+
+# Global semaphore for concurrency control
+_semaphore = None
+
+
+def _get_semaphore() -> asyncio.Semaphore:
+    """Get or create the global semaphore for task concurrency control.
+
+    Creates a new semaphore if none exists or if the current one is bound
+    to a different event loop (common in testing scenarios).
+    """
+    global _semaphore
+    if _semaphore is None:
+        _semaphore = asyncio.Semaphore(settings.max_concurrent_tasks)
+        logger.debug(f"Created new semaphore with limit {settings.max_concurrent_tasks}")
+    return _semaphore
+
+
+def _reset_semaphore_for_testing():
+    """Reset the global semaphore. Only for testing purposes."""
+    global _semaphore
+    _semaphore = None
 
 
 async def _update_task_status(
@@ -48,116 +71,173 @@ async def _update_task_status(
 
 async def process_task(task_id: UUID):
     """
-    Process a single task: transcription.
+    Process a single task: transcription and summarization.
+
+    Raises exceptions for transient failures that should be retried.
+    Returns normally for permanent failures (file not found, task not found).
+
+    Args:
+        task_id: UUID of the task to process
+
+    Raises:
+        Exception: For transient errors that should be retried
+    """
+    task = None
+    async with AsyncSessionLocal() as db:
+        # Get task and recording with eager loading
+        result = await db.execute(
+            select(Task)
+            .options(selectinload(Task.recording))
+            .where(Task.id == task_id)
+        )
+        task = result.scalar_one_or_none()
+
+        if not task:
+            logger.error(f"Task {task_id} not found")
+            return  # Permanent failure - don't retry
+
+        # Check if recording exists
+        if not task.recording:
+            await _update_task_status(
+                task, db, "failed",
+                f"Task {task_id}: Recording not found or deleted",
+                "Recording not found or deleted"
+            )
+            return  # Permanent failure - don't retry
+
+        file_path = task.recording.file_path
+
+        # Verify file exists on disk
+        if not os.path.exists(file_path):
+            await _update_task_status(
+                task, db, "failed",
+                f"Task {task_id}: File not found on disk: {file_path}",
+                f"Audio file not found: {file_path}"
+            )
+            return  # Permanent failure - don't retry
+
+        # Update status to transcribing
+        await _update_task_status(
+            task, db, "transcribing",
+            f"Task {task_id} started transcribing"
+        )
+
+        # Perform transcription - let exceptions propagate for retry
+        transcript = await mock_transcribe(file_path)
+
+        # Save transcript
+        task.transcript = transcript
+        await db.commit()
+        logger.info(f"Task {task_id} transcription completed")
+
+        # Update status to summarizing
+        await _update_task_status(
+            task, db, "summarizing",
+            f"Task {task_id} started summarizing"
+        )
+
+        # Perform LLM summarization - let exceptions propagate for retry
+        summary_result = await llm_summarize(transcript)
+
+        # Save summary and update status to done
+        task.summary_json = summary_result
+        task.status = "done"
+        task.error_message = None
+        await db.commit()
+        logger.info(f"Task {task_id} completed successfully")
+
+
+
+async def process_task_with_retry(task_id: UUID):
+    """
+    Process a task with automatic retry logic.
+
+    Retries up to MAX_RETRIES times with exponential backoff (1s, 2s, 4s).
+    Only marks task as failed after all retries are exhausted.
 
     Args:
         task_id: UUID of the task to process
     """
-    task = None  # P0-1: Initialize to avoid unbound variable in exception handler
-    async with AsyncSessionLocal() as db:
+    max_retries = settings.max_retries
+
+    for attempt in range(max_retries + 1):  # Initial attempt + retries
         try:
-            # P2-6: Get task and recording with eager loading (avoid N+1 query)
-            result = await db.execute(
-                select(Task)
-                .options(selectinload(Task.recording))
-                .where(Task.id == task_id)
-            )
-            task = result.scalar_one_or_none()
-
-            if not task:
-                logger.error(f"Task {task_id} not found")
-                return
-
-            # P0-3: Check if recording exists after refresh
-            if not task.recording:
-                await _update_task_status(
-                    task, db, "failed",
-                    f"Task {task_id}: Recording not found or deleted",
-                    "Recording not found or deleted"
-                )
-                return
-
-            file_path = task.recording.file_path
-
-            # P2-8: Verify file exists on disk before processing
-            if not os.path.exists(file_path):
-                await _update_task_status(
-                    task, db, "failed",
-                    f"Task {task_id}: File not found on disk: {file_path}",
-                    f"Audio file not found: {file_path}"
-                )
-                return
-
-            # Update status to transcribing
-            await _update_task_status(
-                task, db, "transcribing",
-                f"Task {task_id} started transcribing"
-            )
-
-            # Perform mock transcription
-            try:
-                transcript = await mock_transcribe(file_path)
-
-                # Save transcript
-                task.transcript = transcript
-                await db.commit()
-                logger.info(f"Task {task_id} transcription completed")
-
-                # Update status to summarizing
-                await _update_task_status(
-                    task, db, "summarizing",
-                    f"Task {task_id} started summarizing"
-                )
-
-                # Perform LLM summarization
-                try:
-                    summary_result = await llm_summarize(transcript)
-
-                    # Save summary and update status to done
-                    task.summary_json = summary_result
-                    task.status = "done"
-                    task.error_message = None
-                    await db.commit()
-                    logger.info(f"Task {task_id} completed successfully")
-
-                except Exception as e:
-                    # Summarization failed
-                    await _update_task_status(
-                        task, db, "failed",
-                        f"Task {task_id} failed at summarization stage",
-                        f"Summarization error: {str(e)}"
-                    )
-
-            except Exception as e:
-                # Transcription failed
-                await _update_task_status(
-                    task, db, "failed",
-                    f"Task {task_id} failed: {e}",
-                    str(e)
-                )
+            await process_task(task_id)
+            # Success - no need to retry
+            return
 
         except Exception as e:
-            logger.error(f"Error processing task {task_id}: {e}")
-            # Try to mark task as failed
-            try:
-                if task:
-                    task.status = "failed"
-                    task.error_message = f"Processing error: {str(e)}"
-                    await db.commit()
-            except Exception as ex:
-                # Log the failure to update status
-                logger.error(f"Failed to mark task {task_id} as failed: {ex}")
+            # Check if task still exists and update retry count
+            async with AsyncSessionLocal() as db:
+                try:
+                    result = await db.execute(
+                        select(Task).where(Task.id == task_id)
+                    )
+                    task = result.scalar_one_or_none()
 
+                    if not task:
+                        # Task was deleted - abort retry
+                        logger.warning(
+                            f"Task {task_id} not found in database, aborting retry"
+                        )
+                        return
+
+                    if attempt < max_retries:
+                        # Not the last attempt - increment retry count and retry
+                        task.retry_count = attempt + 1
+                        await db.commit()
+
+                        delay = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                        logger.info(
+                            f"Task {task_id} retry attempt {attempt + 1}/{max_retries} "
+                            f"after {delay}s delay (error: {str(e)[:100]})"
+                        )
+                        await asyncio.sleep(delay)
+
+                    else:
+                        # Last attempt failed - mark as failed
+                        task.retry_count = max_retries
+                        task.status = "failed"
+                        # Preserve original error message if it's more specific
+                        if not task.error_message:
+                            task.error_message = f"All retries exhausted: {str(e)}"
+                        await db.commit()
+                        logger.error(
+                            f"Task {task_id} failed after {max_retries} retries: {e}"
+                        )
+                        return
+
+                except Exception as db_error:
+                    logger.error(
+                        f"Failed to update retry count for task {task_id}: {db_error}"
+                    )
+                    # Don't continue retry loop if we can't update the database
+                    return
+
+
+async def process_task_with_semaphore(task_id: UUID):
+    """
+    Wrapper that enforces semaphore-based concurrency control.
+
+    Args:
+        task_id: UUID of the task to process
+    """
+    semaphore = _get_semaphore()
+
+    logger.info(f"Task {task_id} waiting for processing slot")
+    async with semaphore:
+        logger.info(f"Task {task_id} acquired processing slot")
+        await process_task_with_retry(task_id)
 
 
 def schedule_task(task_id: UUID):
     """
-    Schedule a task for background processing.
+    Schedule a task for background processing with retry and concurrency control.
 
     Args:
         task_id: UUID of the task to schedule
     """
-    task = asyncio.create_task(process_task(task_id))
+    task = asyncio.create_task(process_task_with_semaphore(task_id))
 
     # Keep a reference to prevent garbage collection
     _background_tasks.add(task)
