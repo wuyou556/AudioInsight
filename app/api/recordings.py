@@ -12,6 +12,7 @@ from app.database import get_db
 from app.models import Recording, Task
 from app.schemas import RecordingUploadResponse, ErrorResponse
 from app.config import settings
+from app.services.task_processor import schedule_task
 
 router = APIRouter(prefix="/v1/recordings", tags=["recordings"])
 logger = logging.getLogger(__name__)
@@ -158,6 +159,9 @@ async def upload_recording(
         f"Recording uploaded: recording_id={recording.id}, "
         f"filename={file.filename}, file_size={file_size}"
     )
+
+    # Schedule background task processing
+    schedule_task(task.id)
 
     return RecordingUploadResponse(
         recording_id=recording.id,
