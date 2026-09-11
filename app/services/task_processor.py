@@ -22,6 +22,7 @@ async def process_task(task_id: UUID):
     Args:
         task_id: UUID of the task to process
     """
+    task = None  # P0-1: Initialize to avoid unbound variable in exception handler
     async with AsyncSessionLocal() as db:
         try:
             # Get task and recording
@@ -36,6 +37,15 @@ async def process_task(task_id: UUID):
 
             # Get recording file path
             await db.refresh(task, ["recording"])
+
+            # P0-3: Check if recording exists after refresh
+            if not task.recording:
+                logger.error(f"Task {task_id}: Recording not found or deleted")
+                task.status = "failed"
+                task.error_message = "Recording not found or deleted"
+                await db.commit()
+                return
+
             file_path = task.recording.file_path
 
             # Update status to transcribing
@@ -69,8 +79,10 @@ async def process_task(task_id: UUID):
                     task.status = "failed"
                     task.error_message = f"Processing error: {str(e)}"
                     await db.commit()
-            except Exception:
-                pass
+            except Exception as ex:
+                # Log the failure to update status
+                logger.error(f"Failed to mark task {task_id} as failed: {ex}")
+
 
 
 def schedule_task(task_id: UUID):
@@ -84,6 +96,7 @@ def schedule_task(task_id: UUID):
 
     # Keep a reference to prevent garbage collection
     _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    # P0-2: Fix callback signature - discard expects the asyncio.Task object
+    task.add_done_callback(lambda t: _background_tasks.discard(t))
 
     logger.info(f"Task {task_id} scheduled for processing")
