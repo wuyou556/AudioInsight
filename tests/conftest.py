@@ -77,3 +77,64 @@ def sample_audio_file():
     """Create a sample audio file content."""
     # Return a small WAV file header (valid format)
     return b"RIFF" + b"\x00" * 100  # Minimal WAV file structure
+
+
+@pytest_asyncio.fixture
+async def sample_recording(test_db):
+    """Create a sample recording for tests."""
+    import uuid
+    from app.models import Recording
+
+    async with test_db() as db:
+        recording = Recording(
+            filename="test.mp3",
+            file_path="uploads/test.wav",
+            file_size=1024,
+            file_hash=str(uuid.uuid4()),
+            mime_type="audio/mpeg"
+        )
+        db.add(recording)
+        await db.commit()
+        await db.refresh(recording)
+
+        recording_id = recording.id
+
+    yield recording_id
+
+    # Cleanup handled by test_db fixture dropping all tables
+
+
+@pytest_asyncio.fixture
+async def sample_recording_with_task(test_db):
+    """Create a sample recording with a task for tests."""
+    import uuid
+    from app.models import Recording, Task
+
+    async with test_db() as db:
+        recording = Recording(
+            filename="test.mp3",
+            file_path="uploads/test.wav",
+            file_size=1024,
+            file_hash=str(uuid.uuid4()),
+            mime_type="audio/mpeg"
+        )
+        db.add(recording)
+        await db.commit()
+        await db.refresh(recording)
+
+        task = Task(
+            recording_id=recording.id,
+            status="done",
+            transcript="Test transcript",
+            summary_json={"summary": "Test summary", "key_points": [], "todos": []}
+        )
+        db.add(task)
+        await db.commit()
+        await db.refresh(task)
+
+        recording_id = recording.id
+        task_id = task.id
+
+    yield recording_id, task_id
+
+    # Cleanup handled by test_db fixture dropping all tables

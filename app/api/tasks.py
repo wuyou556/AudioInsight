@@ -1,13 +1,13 @@
 """API endpoints for task operations."""
 import logging
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
 from app.database import get_db
 from app.models import Task
 from app.schemas import TaskStatusResponse, ErrorResponse
+from app.api.utils import get_or_404
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -36,24 +36,8 @@ async def get_task_status(
     - created_at: Task creation timestamp
     - updated_at: Last update timestamp
     """
-    # Query task
-    result = await db.execute(
-        select(Task).where(Task.id == task_id)
-    )
-    task = result.scalar_one_or_none()
-
-    if not task:
-        logger.warning(f"Task {task_id} not found")
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "error": {
-                    "code": "TASK_NOT_FOUND",
-                    "message": f"Task {task_id} not found",
-                    "details": {}
-                }
-            }
-        )
+    # Use utility function for get-or-404 pattern
+    task = await get_or_404(db, Task, task_id, "Task")
 
     return TaskStatusResponse(
         task_id=task.id,

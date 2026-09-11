@@ -22,6 +22,7 @@ from app.schemas import (
 )
 from app.config import settings
 from app.services.task_processor import schedule_task
+from app.api.utils import get_or_404
 
 router = APIRouter(prefix="/v1/recordings", tags=["recordings"])
 logger = logging.getLogger(__name__)
@@ -34,6 +35,70 @@ MIME_TYPE_MAP = {
     ".m4a": "audio/mp4",
     ".aac": "audio/aac"
 }
+
+
+async def _fetch_recordings_with_latest_status(
+    db: AsyncSession,
+    offset: int,
+    limit: int
+) -> list[RecordingListItem]:
+    """
+    Fetch recordings with their latest task status using optimized query.
+
+    Solves N+1 query problem by using a subquery to get latest task status
+    in a single additional query instead of one query per recording.
+
+    Args:
+        db: Database session
+        offset: Query offset for pagination
+        limit: Query limit for pagination
+
+    Returns:
+        List of RecordingListItem with latest_status populated
+    """
+    from sqlalchemy import literal_column
+
+    # Get recordings ordered by created_at DESC (uses idx_recordings_created_at)
+    recordings_result = await db.execute(
+        select(Recording)
+        .order_by(Recording.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    recordings = recordings_result.scalars().all()
+
+    if not recordings:
+        return []
+
+    # Get all recording IDs
+    recording_ids = [r.id for r in recordings]
+
+    # Fetch latest task status for all recordings in one query
+    # Use DISTINCT ON to get only the latest task per recording
+    latest_tasks_result = await db.execute(
+        select(Task.recording_id, Task.status)
+        .where(Task.recording_id.in_(recording_ids))
+        .order_by(Task.recording_id, Task.created_at.desc())
+    )
+
+    # Build a map of recording_id -> latest_status
+    status_map = {}
+    for recording_id, status in latest_tasks_result:
+        if recording_id not in status_map:
+            status_map[recording_id] = status
+
+    # Build response items
+    items = []
+    for recording in recordings:
+        items.append(RecordingListItem(
+            recording_id=recording.id,
+            filename=recording.filename,
+            file_size=recording.file_size,
+            created_at=recording.created_at,
+            latest_status=status_map.get(recording.id)
+        ))
+
+    return items
 
 
 @router.get(
@@ -75,34 +140,8 @@ async def list_recordings(
     )
     total = count_result.scalar()
 
-    # Get recordings ordered by created_at DESC (uses idx_recordings_created_at)
-    recordings_result = await db.execute(
-        select(Recording)
-        .order_by(Recording.created_at.desc())
-        .offset(offset)
-        .limit(page_size)
-    )
-    recordings = recordings_result.scalars().all()
-
-    # Build response items
-    items = []
-    for recording in recordings:
-        # Get latest task status for this recording
-        task_result = await db.execute(
-            select(Task.status)
-            .where(Task.recording_id == recording.id)
-            .order_by(Task.created_at.desc())
-            .limit(1)
-        )
-        latest_status = task_result.scalar_one_or_none()
-
-        items.append(RecordingListItem(
-            recording_id=recording.id,
-            filename=recording.filename,
-            file_size=recording.file_size,
-            created_at=recording.created_at,
-            latest_status=latest_status
-        ))
+    # Fetch recordings with latest status (optimized to avoid N+1 query)
+    items = await _fetch_recordings_with_latest_status(db, offset, page_size)
 
     return RecordingListResponse(
         items=items,
@@ -288,24 +327,8 @@ async def get_recording_detail(
       - transcript: Transcribed text (only if status=done)
       - summary: Summary JSON (only if status=done)
     """
-    # Query recording
-    result = await db.execute(
-        select(Recording).where(Recording.id == recording_id)
-    )
-    recording = result.scalar_one_or_none()
-
-    if not recording:
-        logger.warning(f"Recording {recording_id} not found")
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "error": {
-                    "code": "RECORDING_NOT_FOUND",
-                    "message": f"Recording {recording_id} not found",
-                    "details": {}
-                }
-            }
-        )
+    # Use utility function for get-or-404 pattern
+    recording = await get_or_404(db, Recording, recording_id, "Recording")
 
     # Query latest task for this recording
     task_result = await db.execute(
