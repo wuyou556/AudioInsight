@@ -89,6 +89,9 @@ async def upload_recording(
     saved_filename = f"{file_id}{file_ext}"
     file_path = upload_dir / saved_filename
 
+    # Store relative path for database
+    relative_path = f"{settings.upload_dir}/{saved_filename}"
+
     # Save file to disk
     try:
         with open(file_path, "wb") as f:
@@ -113,7 +116,7 @@ async def upload_recording(
     recording = Recording(
         id=file_id,
         filename=file.filename,
-        file_path=str(file_path),
+        file_path=relative_path,
         file_size=file_size,
         mime_type=mime_type,
         file_hash=str(file_id)  # Temporary: use UUID as hash, real hash implementation in future issue
