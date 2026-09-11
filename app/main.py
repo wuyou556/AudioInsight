@@ -1,5 +1,6 @@
 from datetime import datetime
 from contextlib import asynccontextmanager
+import asyncio
 import logging
 
 from fastapi import FastAPI, Response
@@ -8,6 +9,7 @@ from sqlalchemy import text
 
 from app.database import AsyncSessionLocal
 from app.api import recordings, tasks
+from app.services.task_processor import recover_tasks_on_startup
 
 
 # Configure logging
@@ -23,9 +25,35 @@ async def lifespan(app: FastAPI):
     """Lifespan events for the FastAPI application."""
     # Startup
     logger.info("Starting AudioInsight service...")
+
+    # Recover incomplete tasks from previous run in background
+    # Use asyncio.create_task to avoid blocking server startup
+    asyncio.create_task(_recover_tasks_with_timeout())
+
     yield
     # Shutdown
     logger.info("Shutting down AudioInsight service...")
+
+
+async def _recover_tasks_with_timeout():
+    """
+    Wrapper to run task recovery with a timeout.
+
+    Runs in background to avoid blocking server startup.
+    """
+    try:
+        # Set reasonable timeout (30 seconds)
+        await asyncio.wait_for(
+            recover_tasks_on_startup(),
+            timeout=30.0
+        )
+    except asyncio.TimeoutError:
+        logger.error(
+            "Task recovery timed out after 30 seconds. "
+            "Server started but some tasks may not have been recovered."
+        )
+    except Exception as e:
+        logger.error(f"Task recovery failed: {e}", exc_info=True)
 
 
 app = FastAPI(

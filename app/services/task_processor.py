@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import os
+from datetime import datetime, timedelta
 from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -245,3 +246,100 @@ def schedule_task(task_id: UUID):
     task.add_done_callback(lambda t: _background_tasks.discard(t))
 
     logger.info(f"Task {task_id} scheduled for processing")
+
+
+async def recover_tasks_on_startup() -> dict:
+    """
+    Recover incomplete tasks on service startup.
+
+    Detects and resets zombie tasks (stuck in processing states for too long),
+    then reschedules all pending tasks.
+
+    Returns:
+        dict: Statistics about recovered tasks
+            - zombie_reset: number of zombie tasks reset to pending
+            - pending_recovered: number of pending tasks rescheduled
+    """
+    zombie_reset = 0
+    pending_recovered = 0
+
+    try:
+        async with AsyncSessionLocal() as db:
+            # Calculate zombie task cutoff time
+            zombie_cutoff = datetime.utcnow() - timedelta(seconds=settings.zombie_task_timeout)
+
+            # Find zombie tasks (stuck in processing states)
+            zombie_query = select(Task).where(
+                Task.status.in_(['transcribing', 'summarizing']),
+                Task.updated_at < zombie_cutoff
+            )
+            zombie_result = await db.execute(zombie_query)
+            zombie_tasks = zombie_result.scalars().all()
+
+            # Reset zombie tasks to pending
+            for task in zombie_tasks:
+                old_status = task.status
+                old_updated_at = task.updated_at
+
+                task.status = "pending"
+                task.retry_count = 0  # Reset retry count for fresh start
+                task.error_message = None  # Clear old error messages
+                # Don't manually set updated_at - let SQLAlchemy's onupdate handle it
+
+                zombie_reset += 1
+                logger.warning(
+                    f"Reset zombie task {task.id} from {old_status} state "
+                    f"(stuck since: {old_updated_at})"
+                )
+
+            if zombie_reset > 0:
+                try:
+                    await db.commit()
+                    logger.info(f"Reset {zombie_reset} zombie tasks to pending")
+                except Exception as commit_error:
+                    logger.error(f"Failed to commit zombie task resets: {commit_error}")
+                    await db.rollback()
+                    # Reset counter since commit failed
+                    zombie_reset = 0
+                    # Don't continue to scheduling if reset failed
+                    return {
+                        'zombie_reset': 0,
+                        'pending_recovered': 0
+                    }
+
+        # Use a fresh session for querying pending tasks
+        async with AsyncSessionLocal() as db:
+            # Find all pending tasks, but only load their IDs
+            # Limit to reasonable batch size to avoid memory issues
+            BATCH_LIMIT = 1000
+            pending_query = (
+                select(Task.id)
+                .where(Task.status == 'pending')
+                .limit(BATCH_LIMIT)
+            )
+            pending_result = await db.execute(pending_query)
+            pending_task_ids = pending_result.scalars().all()
+
+            # Schedule all pending tasks
+            for task_id in pending_task_ids:
+                schedule_task(task_id)
+                pending_recovered += 1
+
+            if pending_recovered >= BATCH_LIMIT:
+                logger.warning(
+                    f"Reached batch limit ({BATCH_LIMIT}) for pending task recovery. "
+                    "Some tasks may not have been scheduled."
+                )
+
+            logger.info(
+                f"Task recovery complete: recovered {pending_recovered} pending tasks, "
+                f"reset {zombie_reset} zombie tasks"
+            )
+
+    except Exception as e:
+        logger.error(f"Error during task recovery: {e}", exc_info=True)
+
+    return {
+        'zombie_reset': zombie_reset,
+        'pending_recovered': pending_recovered
+    }
