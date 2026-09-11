@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import AsyncSessionLocal
 from app.models import Task
 from app.services.transcription import mock_transcribe
+from app.services.summarization import llm_summarize
 
 logger = logging.getLogger(__name__)
 
@@ -66,15 +67,37 @@ async def process_task(task_id: UUID):
             try:
                 transcript = await mock_transcribe(file_path)
 
-                # P1: Save transcript and update status to done (include commit in try)
+                # Save transcript
                 task.transcript = transcript
-                task.status = "done"
-                task.error_message = None
                 await db.commit()
-                logger.info(f"Task {task_id} completed successfully")
+                logger.info(f"Task {task_id} transcription completed")
+
+                # Update status to summarizing
+                task.status = "summarizing"
+                await db.commit()
+                logger.info(f"Task {task_id} started summarizing")
+
+                # Perform LLM summarization
+                try:
+                    summary_result = await llm_summarize(transcript)
+
+                    # Save summary and update status to done
+                    task.summary_json = summary_result
+                    task.status = "done"
+                    task.error_message = None
+                    await db.commit()
+                    logger.info(f"Task {task_id} completed successfully")
+
+                except Exception as e:
+                    # Summarization failed
+                    logger.error(f"Task {task_id} summarization failed: {e}")
+                    task.status = "failed"
+                    task.error_message = f"Summarization error: {str(e)}"
+                    await db.commit()
+                    logger.error(f"Task {task_id} failed at summarization stage")
 
             except Exception as e:
-                # P1: Transcription or commit failed
+                # Transcription failed
                 task.status = "failed"
                 task.error_message = str(e)
                 await db.commit()
