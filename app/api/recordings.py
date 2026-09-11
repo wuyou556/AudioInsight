@@ -357,3 +357,55 @@ async def get_recording_detail(
         latest_task=latest_task_info
     )
 
+
+@router.delete(
+    "/{recording_id}",
+    status_code=204,
+    responses={
+        404: {"model": ErrorResponse, "description": "Recording not found"}
+    },
+    summary="Delete recording",
+    description="Delete a recording and its associated tasks, including the physical audio file"
+)
+async def delete_recording(
+    recording_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Delete a recording by ID.
+
+    This operation:
+    - Deletes the physical audio file from disk (if exists)
+    - Deletes the Recording record from database
+    - Automatically deletes all associated Task records (CASCADE)
+
+    If the physical file doesn't exist (e.g., manually deleted), only the
+    database records are removed and a warning is logged.
+
+    Returns 204 No Content on success.
+    """
+    # Get recording or 404
+    recording = await get_or_404(db, Recording, recording_id, "Recording")
+
+    file_path = recording.file_path
+
+    # Attempt to delete physical file
+    if os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+            logger.info(f"Recording {recording_id} deleted, file: {file_path}")
+        except Exception as e:
+            # Log warning but don't block database deletion
+            logger.warning(f"Failed to delete file {file_path} for recording {recording_id}: {e}")
+    else:
+        logger.warning(f"File {file_path} for recording {recording_id} does not exist, skipping file deletion")
+
+    # Delete from database (CASCADE will delete associated tasks)
+    await db.delete(recording)
+    await db.commit()
+
+    logger.info(f"Recording {recording_id} deleted from database")
+
+    # Return 204 No Content (FastAPI handles this with status_code=204)
+    return None
+
