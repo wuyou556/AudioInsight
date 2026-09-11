@@ -8,11 +8,16 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+# LLM API constants
+LLM_TIMEOUT_SECONDS = 60.0
+LLM_TEMPERATURE = 0.3
+LLM_MAX_TOKENS = 1000
+
 # Initialize OpenAI client with DeepSeek API
 client = AsyncOpenAI(
     api_key=settings.deepseek_api_key,
     base_url=settings.deepseek_api_base,
-    timeout=60.0,  # 60 seconds timeout
+    timeout=LLM_TIMEOUT_SECONDS,
 )
 
 # System prompt for structured summarization
@@ -65,8 +70,8 @@ async def llm_summarize(transcript: str, max_retries: int = 1) -> Dict[str, Any]
                     {"role": "user", "content": f"转写文本：\n\n{transcript}"}
                 ],
                 response_format={"type": "json_object"},
-                temperature=0.3,
-                max_tokens=1000,
+                temperature=LLM_TEMPERATURE,
+                max_tokens=LLM_MAX_TOKENS,
             )
 
             # Extract content
@@ -106,19 +111,16 @@ async def llm_summarize(transcript: str, max_retries: int = 1) -> Dict[str, Any]
 
             return result
 
-        except json.JSONDecodeError as e:
-            # Already handled above
-            last_error = e
-            attempt += 1
-            continue
-
         except Exception as e:
-            # API errors, network errors, etc.
-            logger.error(f"LLM summarization failed on attempt {attempt + 1}: {e}")
-            if attempt >= max_retries:
+            # API errors, network errors, validation errors
+            # Only JSON parse errors should retry (spec requirement)
+            if isinstance(e, json.JSONDecodeError):
+                # Already handled above in inner try-except
+                pass
+            else:
+                # Non-JSON errors: log and fail immediately
+                logger.error(f"LLM summarization failed: {e}")
                 raise
-            last_error = e
-            attempt += 1
 
     # If we get here, all retries failed
     error_msg = f"LLM summarization failed after {max_retries + 1} attempts"

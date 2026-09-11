@@ -18,6 +18,34 @@ logger = logging.getLogger(__name__)
 _background_tasks = set()
 
 
+async def _update_task_status(
+    task: Task,
+    db: AsyncSession,
+    status: str,
+    log_message: str,
+    error_message: str = None
+):
+    """
+    Helper function to update task status and log.
+
+    Args:
+        task: Task to update
+        db: Database session
+        status: New status value
+        log_message: Message to log
+        error_message: Optional error message to save
+    """
+    task.status = status
+    if error_message:
+        task.error_message = error_message
+    await db.commit()
+
+    if status == "failed":
+        logger.error(log_message)
+    else:
+        logger.info(log_message)
+
+
 async def process_task(task_id: UUID):
     """
     Process a single task: transcription.
@@ -42,26 +70,29 @@ async def process_task(task_id: UUID):
 
             # P0-3: Check if recording exists after refresh
             if not task.recording:
-                logger.error(f"Task {task_id}: Recording not found or deleted")
-                task.status = "failed"
-                task.error_message = "Recording not found or deleted"
-                await db.commit()
+                await _update_task_status(
+                    task, db, "failed",
+                    f"Task {task_id}: Recording not found or deleted",
+                    "Recording not found or deleted"
+                )
                 return
 
             file_path = task.recording.file_path
 
             # P2-8: Verify file exists on disk before processing
             if not os.path.exists(file_path):
-                logger.error(f"Task {task_id}: File not found on disk: {file_path}")
-                task.status = "failed"
-                task.error_message = f"Audio file not found: {file_path}"
-                await db.commit()
+                await _update_task_status(
+                    task, db, "failed",
+                    f"Task {task_id}: File not found on disk: {file_path}",
+                    f"Audio file not found: {file_path}"
+                )
                 return
 
             # Update status to transcribing
-            task.status = "transcribing"
-            await db.commit()
-            logger.info(f"Task {task_id} started transcribing")
+            await _update_task_status(
+                task, db, "transcribing",
+                f"Task {task_id} started transcribing"
+            )
 
             # Perform mock transcription
             try:
@@ -73,9 +104,10 @@ async def process_task(task_id: UUID):
                 logger.info(f"Task {task_id} transcription completed")
 
                 # Update status to summarizing
-                task.status = "summarizing"
-                await db.commit()
-                logger.info(f"Task {task_id} started summarizing")
+                await _update_task_status(
+                    task, db, "summarizing",
+                    f"Task {task_id} started summarizing"
+                )
 
                 # Perform LLM summarization
                 try:
@@ -90,18 +122,19 @@ async def process_task(task_id: UUID):
 
                 except Exception as e:
                     # Summarization failed
-                    logger.error(f"Task {task_id} summarization failed: {e}")
-                    task.status = "failed"
-                    task.error_message = f"Summarization error: {str(e)}"
-                    await db.commit()
-                    logger.error(f"Task {task_id} failed at summarization stage")
+                    await _update_task_status(
+                        task, db, "failed",
+                        f"Task {task_id} failed at summarization stage",
+                        f"Summarization error: {str(e)}"
+                    )
 
             except Exception as e:
                 # Transcription failed
-                task.status = "failed"
-                task.error_message = str(e)
-                await db.commit()
-                logger.error(f"Task {task_id} failed: {e}")
+                await _update_task_status(
+                    task, db, "failed",
+                    f"Task {task_id} failed: {e}",
+                    str(e)
+                )
 
         except Exception as e:
             logger.error(f"Error processing task {task_id}: {e}")
