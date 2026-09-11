@@ -408,6 +408,54 @@
             cursor: not-allowed;
         }
 
+        /* Upload progress */
+        .upload-item {
+            background: var(--gray-50);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .upload-item-icon {
+            font-size: 1.5rem;
+        }
+
+        .upload-item-info {
+            flex: 1;
+        }
+
+        .upload-item-name {
+            font-weight: 500;
+            margin-bottom: 0.25rem;
+            color: var(--gray-900);
+        }
+
+        .upload-item-status {
+            font-size: 0.875rem;
+            color: var(--gray-600);
+        }
+
+        .upload-item-status.success {
+            color: var(--success);
+        }
+
+        .upload-item-status.error {
+            color: var(--error);
+        }
+
+        .upload-summary {
+            background: var(--primary);
+            color: white;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-top: 1rem;
+            text-align: center;
+            font-weight: 500;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             body {
@@ -456,15 +504,12 @@
                 <div class="upload-area" id="upload-area">
                     <div class="upload-icon">🎵</div>
                     <div class="upload-text">点击或拖拽音频文件到此处</div>
-                    <div class="upload-hint">支持 MP3, WAV, M4A, AAC 格式</div>
-                    <input type="file" id="file-input" accept=".mp3,.wav,.m4a,.aac">
+                    <div class="upload-hint">支持 MP3, WAV, M4A, AAC 格式 | 支持批量上传</div>
+                    <input type="file" id="file-input" accept=".mp3,.wav,.m4a,.aac" multiple>
                 </div>
 
                 <div id="upload-status" style="margin-top: 1rem; display: none;">
-                    <div class="loading">
-                        <div class="spinner"></div>
-                        <p>正在上传...</p>
-                    </div>
+                    <div id="upload-progress"></div>
                 </div>
             </div>
 
@@ -496,6 +541,8 @@
         const API_BASE = 'http://localhost:8000';
         let currentPage = 1;
         const pageSize = 10;
+        let autoRefreshInterval = null;
+        let detailRefreshInterval = null;
 
         // Tab switching
         function switchTab(tab) {
@@ -507,6 +554,45 @@
 
             if (tab === 'list') {
                 loadRecordings(1);
+                startAutoRefresh();
+            } else {
+                stopAutoRefresh();
+            }
+        }
+
+        // Auto refresh recordings list
+        function startAutoRefresh() {
+            // Clear existing interval
+            stopAutoRefresh();
+
+            // Refresh every 3 seconds
+            autoRefreshInterval = setInterval(() => {
+                loadRecordings(currentPage, true);
+            }, 3000);
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+        }
+
+        // Auto refresh detail view
+        function startDetailRefresh(recordingId) {
+            // Clear existing interval
+            stopDetailRefresh();
+
+            // Refresh every 2 seconds
+            detailRefreshInterval = setInterval(() => {
+                viewDetail(recordingId, true);
+            }, 2000);
+        }
+
+        function stopDetailRefresh() {
+            if (detailRefreshInterval) {
+                clearInterval(detailRefreshInterval);
+                detailRefreshInterval = null;
             }
         }
 
@@ -529,53 +615,118 @@
             e.preventDefault();
             uploadArea.classList.remove('dragover');
 
-            const files = e.dataTransfer.files;
+            const files = Array.from(e.dataTransfer.files);
             if (files.length > 0) {
-                uploadFile(files[0]);
+                uploadFiles(files);
             }
         });
 
         fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                uploadFile(e.target.files[0]);
+            const files = Array.from(e.target.files);
+            if (files.length > 0) {
+                uploadFiles(files);
             }
         });
 
-        async function uploadFile(file) {
-            const formData = new FormData();
-            formData.append('file', file);
+        async function uploadFiles(files) {
+            const uploadStatusEl = document.getElementById('upload-status');
+            const uploadProgressEl = document.getElementById('upload-progress');
 
-            document.getElementById('upload-status').style.display = 'block';
+            uploadStatusEl.style.display = 'block';
+            uploadProgressEl.innerHTML = '';
 
-            try {
-                const response = await fetch(`${API_BASE}/v1/recordings`, {
-                    method: 'POST',
-                    body: formData
-                });
+            const results = {
+                total: files.length,
+                success: 0,
+                failed: 0
+            };
 
-                if (response.ok) {
-                    const data = await response.json();
-                    alert(`✅ 上传成功！\n任务ID: ${data.task_id}\n正在处理中...`);
+            // Create upload items
+            const uploadItems = files.map(file => {
+                const itemEl = document.createElement('div');
+                itemEl.className = 'upload-item';
+                itemEl.innerHTML = `
+                    <div class="upload-item-icon">🎵</div>
+                    <div class="upload-item-info">
+                        <div class="upload-item-name">${file.name}</div>
+                        <div class="upload-item-status">准备上传...</div>
+                    </div>
+                `;
+                uploadProgressEl.appendChild(itemEl);
+                return { file, element: itemEl };
+            });
 
-                    // Switch to list tab
-                    document.querySelectorAll('.tab')[1].click();
-                } else {
-                    const error = await response.json();
-                    alert(`❌ 上传失败: ${error.detail?.error?.message || '未知错误'}`);
+            // Upload all files concurrently
+            await Promise.all(uploadItems.map(async ({ file, element }) => {
+                const statusEl = element.querySelector('.upload-item-status');
+                const iconEl = element.querySelector('.upload-item-icon');
+
+                try {
+                    statusEl.textContent = '正在上传...';
+                    statusEl.className = 'upload-item-status';
+
+                    const formData = new FormData();
+                    formData.append('file', file);
+
+                    const response = await fetch(`${API_BASE}/v1/recordings`, {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        statusEl.textContent = `✓ 上传成功 (任务ID: ${data.task_id.substring(0, 8)}...)`;
+                        statusEl.className = 'upload-item-status success';
+                        iconEl.textContent = '✅';
+                        results.success++;
+                    } else {
+                        const error = await response.json();
+                        statusEl.textContent = `✗ 失败: ${error.detail?.error?.message || '未知错误'}`;
+                        statusEl.className = 'upload-item-status error';
+                        iconEl.textContent = '❌';
+                        results.failed++;
+                    }
+                } catch (error) {
+                    statusEl.textContent = `✗ 失败: ${error.message}`;
+                    statusEl.className = 'upload-item-status error';
+                    iconEl.textContent = '❌';
+                    results.failed++;
                 }
-            } catch (error) {
-                alert(`❌ 上传失败: ${error.message}`);
-            } finally {
-                document.getElementById('upload-status').style.display = 'none';
-                fileInput.value = '';
+            }));
+
+            // Show summary
+            const summaryEl = document.createElement('div');
+            summaryEl.className = 'upload-summary';
+            summaryEl.innerHTML = `
+                批量上传完成！总计 ${results.total} 个文件<br>
+                ✅ 成功: ${results.success} | ❌ 失败: ${results.failed}
+            `;
+            uploadProgressEl.appendChild(summaryEl);
+
+            // Clear file input
+            fileInput.value = '';
+
+            // Switch to list tab after 2 seconds
+            if (results.success > 0) {
+                setTimeout(() => {
+                    document.querySelectorAll('.tab')[1].click();
+                }, 2000);
             }
         }
 
+        async function uploadFile(file) {
+            // Deprecated: use uploadFiles instead
+            uploadFiles([file]);
+        }
+
         // Load recordings list
-        async function loadRecordings(page) {
+        async function loadRecordings(page, silent = false) {
             currentPage = page;
             const listEl = document.getElementById('recording-list');
-            listEl.innerHTML = '<div class="loading"><div class="spinner"></div><p>加载中...</p></div>';
+
+            if (!silent) {
+                listEl.innerHTML = '<div class="loading"><div class="spinner"></div><p>加载中...</p></div>';
+            }
 
             try {
                 const response = await fetch(`${API_BASE}/v1/recordings?page=${page}&page_size=${pageSize}`);
@@ -589,7 +740,20 @@
                         </div>
                     `;
                     document.getElementById('pagination').style.display = 'none';
+                    stopAutoRefresh();
                     return;
+                }
+
+                // Check if any task is still processing
+                const hasProcessingTasks = data.items.some(item =>
+                    item.latest_status === 'pending' ||
+                    item.latest_status === 'transcribing' ||
+                    item.latest_status === 'summarizing'
+                );
+
+                // If no processing tasks, stop auto refresh
+                if (!hasProcessingTasks && !silent) {
+                    stopAutoRefresh();
                 }
 
                 listEl.innerHTML = data.items.map(item => `
@@ -619,12 +783,14 @@
                 updatePagination(data.page, data.page_size, data.total);
 
             } catch (error) {
-                listEl.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-icon">❌</div>
-                        <p>加载失败: ${error.message}</p>
-                    </div>
-                `;
+                if (!silent) {
+                    listEl.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-icon">❌</div>
+                            <p>加载失败: ${error.message}</p>
+                        </div>
+                    `;
+                }
             }
         }
 
@@ -666,12 +832,15 @@
         }
 
         // View recording detail
-        async function viewDetail(recordingId) {
+        async function viewDetail(recordingId, silent = false) {
             const detailModal = document.getElementById('detail-modal');
             const detailContent = document.getElementById('detail-content');
 
             detailModal.style.display = 'block';
-            detailContent.innerHTML = '<div class="loading"><div class="spinner"></div><p>加载中...</p></div>';
+
+            if (!silent) {
+                detailContent.innerHTML = '<div class="loading"><div class="spinner"></div><p>加载中...</p></div>';
+            }
 
             try {
                 const response = await fetch(`${API_BASE}/v1/recordings/${recordingId}`);
@@ -689,16 +858,47 @@
                 `;
 
                 if (data.latest_task) {
+                    const taskStatus = data.latest_task.status;
+
                     html += `
                         <div class="detail-section">
                             <div class="section-title">📊 任务状态</div>
-                            <span class="status-badge status-${data.latest_task.status}">
-                                ${formatStatus(data.latest_task.status)}
+                            <span class="status-badge status-${taskStatus}">
+                                ${formatStatus(taskStatus)}
                             </span>
                         </div>
                     `;
 
-                    if (data.latest_task.status === 'done' && data.latest_task.transcript) {
+                    // Check if task is still processing
+                    const isProcessing = taskStatus === 'pending' ||
+                                       taskStatus === 'transcribing' ||
+                                       taskStatus === 'summarizing';
+
+                    if (isProcessing) {
+                        // Start auto refresh for processing tasks
+                        startDetailRefresh(recordingId);
+
+                        html += `
+                            <div class="detail-section">
+                                <div style="background: #FEF3C7; border-radius: 0.75rem; padding: 1rem; color: #92400E;">
+                                    <strong>⏳ 处理中</strong>
+                                    <p style="margin-top: 0.5rem;">
+                                        ${taskStatus === 'pending' ? '任务正在队列中等待...' : ''}
+                                        ${taskStatus === 'transcribing' ? '正在转写音频，请稍候...' : ''}
+                                        ${taskStatus === 'summarizing' ? '正在生成智能摘要，即将完成...' : ''}
+                                    </p>
+                                    <p style="margin-top: 0.5rem; font-size: 0.875rem;">
+                                        💡 页面会自动刷新，无需手动操作
+                                    </p>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        // Stop auto refresh for completed/failed tasks
+                        stopDetailRefresh();
+                    }
+
+                    if (taskStatus === 'done' && data.latest_task.transcript) {
                         html += `
                             <div class="detail-section">
                                 <div class="section-title">📝 转写文本</div>
@@ -734,7 +934,7 @@
                                 </div>
                             `;
                         }
-                    } else if (data.latest_task.status === 'failed') {
+                    } else if (taskStatus === 'failed') {
                         html += `
                             <div class="detail-section">
                                 <div style="background: #FEE2E2; border-radius: 0.75rem; padding: 1rem; color: #991B1B;">
@@ -743,15 +943,6 @@
                                     <button class="btn btn-primary" style="margin-top: 1rem;" onclick="retryTask('${data.latest_task.task_id}')">
                                         🔄 重试
                                     </button>
-                                </div>
-                            </div>
-                        `;
-                    } else {
-                        html += `
-                            <div class="detail-section">
-                                <div style="background: #FEF3C7; border-radius: 0.75rem; padding: 1rem; color: #92400E;">
-                                    <strong>⏳ 处理中</strong>
-                                    <p style="margin-top: 0.5rem;">任务正在处理中，请稍后刷新查看结果</p>
                                 </div>
                             </div>
                         `;
@@ -767,17 +958,20 @@
                 detailContent.innerHTML = html;
 
             } catch (error) {
-                detailContent.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-icon">❌</div>
-                        <p>加载失败: ${error.message}</p>
-                    </div>
-                `;
+                if (!silent) {
+                    detailContent.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-icon">❌</div>
+                            <p>加载失败: ${error.message}</p>
+                        </div>
+                    `;
+                }
             }
         }
 
         function closeDetail() {
             document.getElementById('detail-modal').style.display = 'none';
+            stopDetailRefresh();
         }
 
         // Delete recording

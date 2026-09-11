@@ -3,10 +3,12 @@ from contextlib import asynccontextmanager
 import logging
 
 from fastapi import FastAPI, Response
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.database import AsyncSessionLocal
 from app.api import recordings, tasks
+
 
 # Configure logging
 logging.basicConfig(
@@ -31,6 +33,14 @@ app = FastAPI(
     description="Audio transcription and summarization service",
     version="0.1.0",
     lifespan=lifespan
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 生产环境应限制具体域名
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Register routers
