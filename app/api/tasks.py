@@ -9,6 +9,7 @@ from app.models import Task
 from app.schemas import TaskStatusResponse, TaskRetryResponse, ErrorResponse
 from app.api.utils import get_or_404
 from app.services.task_processor import schedule_task
+from app.enums import TaskStatus
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -82,7 +83,7 @@ async def retry_task(
     task = await get_or_404(db, Task, task_id, "Task")
 
     # Check if task is in failed state
-    if task.status != "failed":
+    if task.status != TaskStatus.FAILED.value:
         logger.warning(f"Task {task_id} retry attempted but status is {task.status}")
         raise HTTPException(
             status_code=409,
@@ -96,7 +97,7 @@ async def retry_task(
         )
 
     # Reset task state
-    task.status = "pending"
+    task.status = TaskStatus.PENDING.value
     task.retry_count += 1
     task.error_message = None
 

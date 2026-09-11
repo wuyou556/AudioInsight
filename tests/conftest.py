@@ -138,3 +138,38 @@ async def sample_recording_with_task(test_db):
     yield recording_id, task_id
 
     # Cleanup handled by test_db fixture dropping all tables
+
+
+@pytest_asyncio.fixture
+async def failed_task(test_db):
+    """Create a sample recording with a failed task for retry tests."""
+    import uuid
+    from app.models import Recording, Task
+
+    async with test_db() as db:
+        recording = Recording(
+            filename="test.mp3",
+            file_path="uploads/test.wav",
+            file_size=1024,
+            file_hash=str(uuid.uuid4()),
+            mime_type="audio/mpeg"
+        )
+        db.add(recording)
+        await db.commit()
+        await db.refresh(recording)
+
+        task = Task(
+            recording_id=recording.id,
+            status="failed",
+            error_message="Something went wrong",
+            retry_count=0
+        )
+        db.add(task)
+        await db.commit()
+        await db.refresh(task)
+
+        task_id = task.id
+
+    yield task_id
+
+    # Cleanup handled by test_db fixture dropping all tables

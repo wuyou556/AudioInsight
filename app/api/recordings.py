@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -393,7 +393,6 @@ async def delete_recording(
     if os.path.exists(file_path):
         try:
             os.remove(file_path)
-            logger.info(f"Recording {recording_id} deleted, file: {file_path}")
         except Exception as e:
             # Log warning but don't block database deletion
             logger.warning(f"Failed to delete file {file_path} for recording {recording_id}: {e}")
@@ -404,8 +403,9 @@ async def delete_recording(
     await db.delete(recording)
     await db.commit()
 
-    logger.info(f"Recording {recording_id} deleted from database")
+    # Always log with consistent format including file path
+    logger.info(f"Recording {recording_id} deleted, file: {file_path}")
 
-    # Return 204 No Content (FastAPI handles this with status_code=204)
-    return None
+    # Return explicit 204 response
+    return Response(status_code=204)
 
