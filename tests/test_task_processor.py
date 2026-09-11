@@ -146,17 +146,17 @@ async def test_task_status_transitions(test_db):
 
         task_id = task.id
 
-    # Mock transcription with delay to check intermediate state
+    # P2-10: Mock transcription with longer delay to avoid race condition
     async def slow_transcribe(file_path):
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.3)  # Increased from 0.1 to ensure status update happens
         return "转写文本"
 
     with patch('app.services.task_processor.mock_transcribe', side_effect=slow_transcribe):
         # Start processing
         process_coro = process_task(task_id)
 
-        # Give it time to update to transcribing
-        await asyncio.sleep(0.05)
+        # P2-10: Give more time for status to update to transcribing
+        await asyncio.sleep(0.15)  # Increased from 0.05 to 0.15
 
         # Check intermediate state
         async with test_db() as db:
