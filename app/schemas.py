@@ -75,6 +75,18 @@ class TaskStatusResponse(BaseModel):
         from_attributes = True
 
 
+class TaskRetryResponse(BaseModel):
+    """Response for POST /v1/tasks/{id}/retry."""
+    task_id: UUID
+    recording_id: UUID
+    status: str
+    retry_count: int
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class LatestTaskInfo(BaseModel):
     """Latest task information for recording detail."""
     task_id: UUID
