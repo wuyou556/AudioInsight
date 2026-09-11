@@ -831,8 +831,17 @@
         }
 
         function formatDate(dateStr) {
-            // Parse UTC time and convert to local time
-            const date = new Date(dateStr);
+            // Handle both formats: with 'Z' suffix (UTC) or without
+            // If no timezone info, assume it's UTC
+            let date;
+            if (dateStr.endsWith('Z') || dateStr.includes('+')) {
+                // Already has timezone info
+                date = new Date(dateStr);
+            } else {
+                // No timezone info, treat as UTC
+                date = new Date(dateStr + 'Z');
+            }
+
             const now = new Date();
             const diff = now - date;
 
