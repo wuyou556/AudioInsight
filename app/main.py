@@ -6,7 +6,7 @@ from fastapi import FastAPI, Response
 from sqlalchemy import text
 
 from app.database import AsyncSessionLocal
-from app.api import recordings
+from app.api import recordings, tasks
 
 # Configure logging
 logging.basicConfig(
@@ -35,6 +35,7 @@ app = FastAPI(
 
 # Register routers
 app.include_router(recordings.router)
+app.include_router(tasks.router, prefix="/v1/tasks", tags=["tasks"])
 
 
 @app.get("/health")

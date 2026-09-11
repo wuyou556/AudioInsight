@@ -61,3 +61,38 @@ class TaskDetail(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class TaskStatusResponse(BaseModel):
+    """Response for GET /v1/tasks/{id}."""
+    task_id: UUID
+    recording_id: UUID
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class LatestTaskInfo(BaseModel):
+    """Latest task information for recording detail."""
+    task_id: UUID
+    status: str
+    transcript: Optional[str] = None
+    summary: Optional[dict] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RecordingDetailResponse(BaseModel):
+    """Response for GET /v1/recordings/{id}."""
+    recording_id: UUID
+    filename: str
+    file_size: int
+    created_at: datetime
+    latest_task: Optional[LatestTaskInfo] = None
+
+    class Config:
+        from_attributes = True

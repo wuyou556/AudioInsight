@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from app.database import get_db
 from app.models import Recording, Task
-from app.schemas import RecordingUploadResponse, ErrorResponse
+from app.schemas import RecordingUploadResponse, RecordingDetailResponse, LatestTaskInfo, ErrorResponse
 from app.config import settings
 from app.services.task_processor import schedule_task
 
@@ -174,3 +174,78 @@ async def upload_recording(
         status=task.status,
         is_duplicate=False
     )
+
+
+@router.get(
+    "/{recording_id}",
+    response_model=RecordingDetailResponse,
+    responses={
+        404: {"model": ErrorResponse, "description": "Recording not found"}
+    },
+    summary="Get recording details",
+    description="Retrieve recording metadata and latest task information"
+)
+async def get_recording_detail(
+    recording_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get recording details by ID.
+
+    Returns recording information including:
+    - recording_id: UUID of the recording
+    - filename: Original filename
+    - file_size: File size in bytes
+    - created_at: Recording creation timestamp
+    - latest_task: Latest task info (if any)
+      - task_id: UUID of the task
+      - status: Current status
+      - transcript: Transcribed text (only if status=done)
+      - summary: Summary JSON (only if status=done)
+    """
+    # Query recording
+    result = await db.execute(
+        select(Recording).where(Recording.id == recording_id)
+    )
+    recording = result.scalar_one_or_none()
+
+    if not recording:
+        logger.warning(f"Recording {recording_id} not found")
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": {
+                    "code": "RECORDING_NOT_FOUND",
+                    "message": f"Recording {recording_id} not found",
+                    "details": {}
+                }
+            }
+        )
+
+    # Query latest task for this recording
+    task_result = await db.execute(
+        select(Task)
+        .where(Task.recording_id == recording_id)
+        .order_by(Task.created_at.desc())
+        .limit(1)
+    )
+    latest_task = task_result.scalar_one_or_none()
+
+    # Build latest_task info
+    latest_task_info = None
+    if latest_task:
+        latest_task_info = LatestTaskInfo(
+            task_id=latest_task.id,
+            status=latest_task.status,
+            transcript=latest_task.transcript if latest_task.status == "done" else None,
+            summary=latest_task.summary_json if latest_task.status == "done" else None
+        )
+
+    return RecordingDetailResponse(
+        recording_id=recording.id,
+        filename=recording.filename,
+        file_size=recording.file_size,
+        created_at=recording.created_at,
+        latest_task=latest_task_info
+    )
+
