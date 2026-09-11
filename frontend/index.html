@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AudioInsight - 音频转写与智能摘要</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #4F46E5;
+            --primary-dark: #4338CA;
+            --primary-light: #818CF8;
+            --success: #10B981;
+            --warning: #F59E0B;
+            --error: #EF4444;
+            --gray-50: #F9FAFB;
+            --gray-100: #F3F4F6;
+            --gray-200: #E5E7EB;
+            --gray-300: #D1D5DB;
+            --gray-600: #4B5563;
+            --gray-700: #374151;
+            --gray-900: #111827;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 2rem;
+            color: var(--gray-900);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+            color: white;
+        }
+
+        h1 {
+            font-size: 3rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .subtitle {
+            font-size: 1.25rem;
+            opacity: 0.9;
+        }
+
+        .main-card {
+            background: white;
+            border-radius: 1.5rem;
+            padding: 2.5rem;
+            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
+            margin-bottom: 2rem;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 2rem;
+            border-bottom: 2px solid var(--gray-200);
+        }
+
+        .tab {
+            padding: 0.75rem 1.5rem;
+            background: none;
+            border: none;
+            font-size: 1rem;
+            font-weight: 500;
+            color: var(--gray-600);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.3s;
+        }
+
+        .tab:hover {
+            color: var(--primary);
+        }
+
+        .tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Upload Section */
+        .upload-area {
+            border: 3px dashed var(--gray-300);
+            border-radius: 1rem;
+            padding: 3rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: var(--gray-50);
+        }
+
+        .upload-area:hover {
+            border-color: var(--primary);
+            background: var(--primary-light);
+            background-opacity: 0.05;
+        }
+
+        .upload-area.dragover {
+            border-color: var(--primary);
+            background: var(--primary-light);
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            color: var(--primary);
+        }
+
+        .upload-text {
+            font-size: 1.125rem;
+            color: var(--gray-700);
+            margin-bottom: 0.5rem;
+        }
+
+        .upload-hint {
+            font-size: 0.875rem;
+            color: var(--gray-600);
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(79, 70, 229, 0.3);
+        }
+
+        .btn-secondary {
+            background: var(--gray-200);
+            color: var(--gray-700);
+        }
+
+        .btn-secondary:hover {
+            background: var(--gray-300);
+        }
+
+        .btn-danger {
+            background: var(--error);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #DC2626;
+        }
+
+        /* Recording List */
+        .recording-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .recording-card {
+            background: var(--gray-50);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s;
+        }
+
+        .recording-card:hover {
+            background: var(--gray-100);
+            transform: translateX(4px);
+        }
+
+        .recording-info {
+            flex: 1;
+        }
+
+        .recording-name {
+            font-weight: 600;
+            font-size: 1.125rem;
+            margin-bottom: 0.5rem;
+            color: var(--gray-900);
+        }
+
+        .recording-meta {
+            display: flex;
+            gap: 1.5rem;
+            font-size: 0.875rem;
+            color: var(--gray-600);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-pending {
+            background: var(--warning);
+            color: white;
+        }
+
+        .status-transcribing {
+            background: #3B82F6;
+            color: white;
+        }
+
+        .status-summarizing {
+            background: #8B5CF6;
+            color: white;
+        }
+
+        .status-done {
+            background: var(--success);
+            color: white;
+        }
+
+        .status-failed {
+            background: var(--error);
+            color: white;
+        }
+
+        .recording-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        /* Detail View */
+        .detail-section {
+            margin-bottom: 2rem;
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: var(--gray-900);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .transcript-box {
+            background: var(--gray-50);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            line-height: 1.8;
+            color: var(--gray-700);
+            white-space: pre-wrap;
+        }
+
+        .summary-content {
+            background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+        }
+
+        .summary-text {
+            font-size: 1.125rem;
+            line-height: 1.8;
+            margin-bottom: 1.5rem;
+            color: var(--gray-700);
+        }
+
+        .key-points {
+            margin-bottom: 1.5rem;
+        }
+
+        .key-points h3,
+        .todos h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+            color: var(--gray-900);
+        }
+
+        .key-points ul,
+        .todos ul {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .key-points li,
+        .todos li {
+            padding-left: 1.5rem;
+            position: relative;
+            color: var(--gray-700);
+        }
+
+        .key-points li::before {
+            content: "●";
+            position: absolute;
+            left: 0;
+            color: var(--primary);
+        }
+
+        .todos li::before {
+            content: "☐";
+            position: absolute;
+            left: 0;
+            color: var(--success);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: var(--gray-600);
+        }
+
+        .empty-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .spinner {
+            border: 3px solid var(--gray-200);
+            border-top: 3px solid var(--primary);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 2rem;
+        }
+
+        .page-btn {
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--gray-300);
+            background: white;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .page-btn:hover {
+            background: var(--gray-50);
+        }
+
+        .page-btn.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        .page-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            body {
+                padding: 1rem;
+            }
+
+            h1 {
+                font-size: 2rem;
+            }
+
+            .main-card {
+                padding: 1.5rem;
+            }
+
+            .recording-card {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 1rem;
+            }
+
+            .recording-actions {
+                width: 100%;
+            }
+
+            .btn {
+                flex: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎙️ AudioInsight</h1>
+            <p class="subtitle">智能音频转写与摘要平台</p>
+        </header>
+
+        <div class="main-card">
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('upload')">📤 上传录音</button>
+                <button class="tab" onclick="switchTab('list')">📋 我的录音</button>
+            </div>
+
+            <!-- Upload Tab -->
+            <div id="upload-tab" class="tab-content active">
+                <div class="upload-area" id="upload-area">
+                    <div class="upload-icon">🎵</div>
+                    <div class="upload-text">点击或拖拽音频文件到此处</div>
+                    <div class="upload-hint">支持 MP3, WAV, M4A, AAC 格式</div>
+                    <input type="file" id="file-input" accept=".mp3,.wav,.m4a,.aac">
+                </div>
+
+                <div id="upload-status" style="margin-top: 1rem; display: none;">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>正在上传...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- List Tab -->
+            <div id="list-tab" class="tab-content">
+                <div id="recording-list" class="recording-list">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>加载中...</p>
+                    </div>
+                </div>
+
+                <div id="pagination" class="pagination" style="display: none;"></div>
+            </div>
+        </div>
+
+        <!-- Detail Modal (hidden by default) -->
+        <div id="detail-modal" class="main-card" style="display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                <h2 style="font-size: 1.75rem; font-weight: 600;">录音详情</h2>
+                <button class="btn btn-secondary" onclick="closeDetail()">✕ 关闭</button>
+            </div>
+
+            <div id="detail-content"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        let currentPage = 1;
+        const pageSize = 10;
+
+        // Tab switching
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+            event.target.classList.add('active');
+            document.getElementById(`${tab}-tab`).classList.add('active');
+
+            if (tab === 'list') {
+                loadRecordings(1);
+            }
+        }
+
+        // Upload handling
+        const uploadArea = document.getElementById('upload-area');
+        const fileInput = document.getElementById('file-input');
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                uploadFile(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                uploadFile(e.target.files[0]);
+            }
+        });
+
+        async function uploadFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            document.getElementById('upload-status').style.display = 'block';
+
+            try {
+                const response = await fetch(`${API_BASE}/v1/recordings`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    alert(`✅ 上传成功！\n任务ID: ${data.task_id}\n正在处理中...`);
+
+                    // Switch to list tab
+                    document.querySelectorAll('.tab')[1].click();
+                } else {
+                    const error = await response.json();
+                    alert(`❌ 上传失败: ${error.detail?.error?.message || '未知错误'}`);
+                }
+            } catch (error) {
+                alert(`❌ 上传失败: ${error.message}`);
+            } finally {
+                document.getElementById('upload-status').style.display = 'none';
+                fileInput.value = '';
+            }
+        }
+
+        // Load recordings list
+        async function loadRecordings(page) {
+            currentPage = page;
+            const listEl = document.getElementById('recording-list');
+            listEl.innerHTML = '<div class="loading"><div class="spinner"></div><p>加载中...</p></div>';
+
+            try {
+                const response = await fetch(`${API_BASE}/v1/recordings?page=${page}&page_size=${pageSize}`);
+                const data = await response.json();
+
+                if (data.items.length === 0) {
+                    listEl.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-icon">📭</div>
+                            <p>还没有录音，去上传一个吧！</p>
+                        </div>
+                    `;
+                    document.getElementById('pagination').style.display = 'none';
+                    return;
+                }
+
+                listEl.innerHTML = data.items.map(item => `
+                    <div class="recording-card">
+                        <div class="recording-info">
+                            <div class="recording-name">${item.filename}</div>
+                            <div class="recording-meta">
+                                <span>📦 ${formatFileSize(item.file_size)}</span>
+                                <span>🕒 ${formatDate(item.created_at)}</span>
+                                <span class="status-badge status-${item.latest_status || 'pending'}">
+                                    ${formatStatus(item.latest_status)}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="recording-actions">
+                            <button class="btn btn-primary" onclick="viewDetail('${item.recording_id}')">
+                                👁️ 查看
+                            </button>
+                            <button class="btn btn-danger" onclick="deleteRecording('${item.recording_id}')">
+                                🗑️ 删除
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+
+                // Update pagination
+                updatePagination(data.page, data.page_size, data.total);
+
+            } catch (error) {
+                listEl.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">❌</div>
+                        <p>加载失败: ${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        function updatePagination(page, pageSize, total) {
+            const totalPages = Math.ceil(total / pageSize);
+            if (totalPages <= 1) {
+                document.getElementById('pagination').style.display = 'none';
+                return;
+            }
+
+            const paginationEl = document.getElementById('pagination');
+            paginationEl.style.display = 'flex';
+
+            let html = `
+                <button class="page-btn" onclick="loadRecordings(${page - 1})" ${page === 1 ? 'disabled' : ''}>
+                    ‹ 上一页
+                </button>
+            `;
+
+            for (let i = 1; i <= totalPages; i++) {
+                if (i === 1 || i === totalPages || (i >= page - 2 && i <= page + 2)) {
+                    html += `
+                        <button class="page-btn ${i === page ? 'active' : ''}" onclick="loadRecordings(${i})">
+                            ${i}
+                        </button>
+                    `;
+                } else if (i === page - 3 || i === page + 3) {
+                    html += '<span style="padding: 0.5rem;">...</span>';
+                }
+            }
+
+            html += `
+                <button class="page-btn" onclick="loadRecordings(${page + 1})" ${page === totalPages ? 'disabled' : ''}>
+                    下一页 ›
+                </button>
+            `;
+
+            paginationEl.innerHTML = html;
+        }
+
+        // View recording detail
+        async function viewDetail(recordingId) {
+            const detailModal = document.getElementById('detail-modal');
+            const detailContent = document.getElementById('detail-content');
+
+            detailModal.style.display = 'block';
+            detailContent.innerHTML = '<div class="loading"><div class="spinner"></div><p>加载中...</p></div>';
+
+            try {
+                const response = await fetch(`${API_BASE}/v1/recordings/${recordingId}`);
+                const data = await response.json();
+
+                let html = `
+                    <div class="detail-section">
+                        <div class="section-title">📁 基本信息</div>
+                        <div class="recording-meta">
+                            <span><strong>文件名:</strong> ${data.filename}</span>
+                            <span><strong>大小:</strong> ${formatFileSize(data.file_size)}</span>
+                            <span><strong>创建时间:</strong> ${formatDate(data.created_at)}</span>
+                        </div>
+                    </div>
+                `;
+
+                if (data.latest_task) {
+                    html += `
+                        <div class="detail-section">
+                            <div class="section-title">📊 任务状态</div>
+                            <span class="status-badge status-${data.latest_task.status}">
+                                ${formatStatus(data.latest_task.status)}
+                            </span>
+                        </div>
+                    `;
+
+                    if (data.latest_task.status === 'done' && data.latest_task.transcript) {
+                        html += `
+                            <div class="detail-section">
+                                <div class="section-title">📝 转写文本</div>
+                                <div class="transcript-box">${data.latest_task.transcript}</div>
+                            </div>
+                        `;
+
+                        if (data.latest_task.summary) {
+                            html += `
+                                <div class="detail-section">
+                                    <div class="section-title">✨ 智能摘要</div>
+                                    <div class="summary-content">
+                                        <div class="summary-text">${data.latest_task.summary.summary}</div>
+
+                                        ${data.latest_task.summary.key_points?.length > 0 ? `
+                                            <div class="key-points">
+                                                <h3>🔑 关键要点</h3>
+                                                <ul>
+                                                    ${data.latest_task.summary.key_points.map(point => `<li>${point}</li>`).join('')}
+                                                </ul>
+                                            </div>
+                                        ` : ''}
+
+                                        ${data.latest_task.summary.todos?.length > 0 ? `
+                                            <div class="todos">
+                                                <h3>📋 待办事项</h3>
+                                                <ul>
+                                                    ${data.latest_task.summary.todos.map(todo => `<li>${todo}</li>`).join('')}
+                                                </ul>
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    } else if (data.latest_task.status === 'failed') {
+                        html += `
+                            <div class="detail-section">
+                                <div style="background: #FEE2E2; border-radius: 0.75rem; padding: 1rem; color: #991B1B;">
+                                    <strong>❌ 处理失败</strong>
+                                    <p style="margin-top: 0.5rem;">任务处理过程中遇到错误</p>
+                                    <button class="btn btn-primary" style="margin-top: 1rem;" onclick="retryTask('${data.latest_task.task_id}')">
+                                        🔄 重试
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        html += `
+                            <div class="detail-section">
+                                <div style="background: #FEF3C7; border-radius: 0.75rem; padding: 1rem; color: #92400E;">
+                                    <strong>⏳ 处理中</strong>
+                                    <p style="margin-top: 0.5rem;">任务正在处理中，请稍后刷新查看结果</p>
+                                </div>
+                            </div>
+                        `;
+                    }
+                } else {
+                    html += `
+                        <div class="empty-state">
+                            <p>暂无任务信息</p>
+                        </div>
+                    `;
+                }
+
+                detailContent.innerHTML = html;
+
+            } catch (error) {
+                detailContent.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">❌</div>
+                        <p>加载失败: ${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        function closeDetail() {
+            document.getElementById('detail-modal').style.display = 'none';
+        }
+
+        // Delete recording
+        async function deleteRecording(recordingId) {
+            if (!confirm('确定要删除这条录音吗？此操作不可恢复！')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/v1/recordings/${recordingId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('✅ 删除成功！');
+                    loadRecordings(currentPage);
+                } else {
+                    const error = await response.json();
+                    alert(`❌ 删除失败: ${error.detail?.error?.message || '未知错误'}`);
+                }
+            } catch (error) {
+                alert(`❌ 删除失败: ${error.message}`);
+            }
+        }
+
+        // Retry task
+        async function retryTask(taskId) {
+            try {
+                const response = await fetch(`${API_BASE}/v1/tasks/${taskId}/retry`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    alert('✅ 已重新开始处理！');
+                    closeDetail();
+                    loadRecordings(currentPage);
+                } else {
+                    const error = await response.json();
+                    alert(`❌ 重试失败: ${error.detail?.error?.message || '未知错误'}`);
+                }
+            } catch (error) {
+                alert(`❌ 重试失败: ${error.message}`);
+            }
+        }
+
+        // Helper functions
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        function formatDate(dateStr) {
+            const date = new Date(dateStr);
+            const now = new Date();
+            const diff = now - date;
+
+            if (diff < 60000) return '刚刚';
+            if (diff < 3600000) return Math.floor(diff / 60000) + ' 分钟前';
+            if (diff < 86400000) return Math.floor(diff / 3600000) + ' 小时前';
+            if (diff < 604800000) return Math.floor(diff / 86400000) + ' 天前';
+
+            return date.toLocaleDateString('zh-CN');
+        }
+
+        function formatStatus(status) {
+            const statusMap = {
+                'pending': '⏳ 等待中',
+                'transcribing': '🎙️ 转写中',
+                'summarizing': '✨ 摘要中',
+                'done': '✅ 完成',
+                'failed': '❌ 失败'
+            };
+            return statusMap[status] || status;
+        }
+    </script>
+</body>
+</html>
