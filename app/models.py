@@ -4,7 +4,7 @@ from typing import Optional
 
 from sqlalchemy import String, Integer, DateTime, Text, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from app.database import Base
 
@@ -74,7 +74,7 @@ class Task(Base):
         index=True
     )
     transcript: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    summary_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    summary_json: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
