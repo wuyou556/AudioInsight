@@ -5,7 +5,7 @@ from app.config import settings
 
 # P2-9: Create async engine with connection pool configuration
 engine = create_async_engine(
-    settings.database_url,
+    settings.async_database_url,
     echo=False,
     future=True,
     pool_size=10,  # Maximum number of connections in the pool

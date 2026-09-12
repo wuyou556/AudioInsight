@@ -26,5 +26,19 @@ class Settings(BaseSettings):
         case_sensitive=False
     )
 
+    @property
+    def async_database_url(self) -> str:
+        """Get async database URL for FastAPI (asyncpg driver)."""
+        if self.database_url.startswith("postgresql://"):
+            return self.database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return self.database_url
+
+    @property
+    def sync_database_url(self) -> str:
+        """Get sync database URL for Alembic (psycopg2 driver)."""
+        if self.database_url.startswith("postgresql+asyncpg://"):
+            return self.database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+        return self.database_url
+
 
 settings = Settings()
