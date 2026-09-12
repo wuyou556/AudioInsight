@@ -4,7 +4,9 @@ import uuid
 import logging
 from pathlib import Path
 from typing import Optional
+import asyncio
 
+import aiofiles
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Response, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -27,6 +29,9 @@ from app.utils import calculate_file_hash
 
 router = APIRouter(prefix="/v1/recordings", tags=["recordings"])
 logger = logging.getLogger(__name__)
+
+# Upload concurrency control - limit concurrent file uploads
+_upload_semaphore = asyncio.Semaphore(5)  # Max 5 concurrent uploads
 
 # Allowed file extensions and MIME types
 ALLOWED_EXTENSIONS = {".wav", ".mp3", ".m4a", ".aac"}
@@ -179,6 +184,17 @@ async def upload_recording(
     - If hash exists and force_reprocess=true, creates new recording
     - Sets is_duplicate=true when returning existing recording
     """
+    # Acquire upload semaphore to limit concurrent uploads
+    async with _upload_semaphore:
+        return await _upload_recording_impl(file, force_reprocess, db)
+
+
+async def _upload_recording_impl(
+    file: UploadFile,
+    force_reprocess: bool,
+    db: AsyncSession
+):
+    """Internal implementation of upload_recording with actual processing logic."""
     # Validate file extension
     file_ext = Path(file.filename).suffix.lower()
     if file_ext not in ALLOWED_EXTENSIONS:
@@ -195,7 +211,8 @@ async def upload_recording(
         )
 
     # Read file content and validate size
-    content = await file.read()
+    # Use asyncio.to_thread to avoid blocking event loop with large files
+    content = await asyncio.to_thread(file.file.read)
     file_size = len(content)
 
     if file_size > settings.max_file_size:
@@ -214,8 +231,8 @@ async def upload_recording(
             }
         )
 
-    # Calculate file hash for deduplication
-    file_hash = calculate_file_hash(content)
+    # Calculate file hash for deduplication in thread pool to avoid blocking
+    file_hash = await asyncio.to_thread(calculate_file_hash, content)
 
     # Check for existing recording with same hash (unless force_reprocess)
     if not force_reprocess:
@@ -276,10 +293,10 @@ async def upload_recording(
     # Store relative path for database
     relative_path = f"{settings.upload_dir}/{saved_filename}"
 
-    # Save file to disk
+    # Save file to disk using aiofiles to avoid blocking
     try:
-        with open(file_path, "wb") as f:
-            f.write(content)
+        async with aiofiles.open(file_path, "wb") as f:
+            await f.write(content)
     except Exception as e:
         logger.error(f"Failed to save file {saved_filename}: {e}")
         raise HTTPException(
