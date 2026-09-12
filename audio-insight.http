@@ -1,0 +1,220 @@
+### AudioInsight API 测试文件
+### 使用 VS Code REST Client 插件或 IntelliJ HTTP Client 运行
+
+### 环境变量配置
+@baseUrl = http://localhost:8000
+@productionUrl = https://audioinsight-production.up.railway.app
+
+# 使用本地环境
+# @apiUrl = {{baseUrl}}
+
+# 使用生产环境
+@apiUrl = {{productionUrl}}
+
+### 全局变量（运行过程中会自动更新）
+# @recordingId = 将从上传响应中提取
+# @taskId = 将从上传响应中提取
+
+###############################################################################
+### 1. 健康检查
+###############################################################################
+
+### 1.1 健康检查 - 验证服务状态
+GET {{apiUrl}}/health
+Accept: application/json
+
+###############################################################################
+### 2. 录音上传
+###############################################################################
+
+### 2.1 上传音频文件（首次上传）
+POST {{apiUrl}}/v1/recordings
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
+
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="file"; filename="test-audio.mp3"
+Content-Type: audio/mpeg
+
+< ./uploads/test-audio.mp3
+------WebKitFormBoundary7MA4YWxkTrZu0gW--
+
+> {%
+    client.global.set("recordingId", response.body.recording_id);
+    client.global.set("taskId", response.body.task_id);
+    client.log("Recording ID: " + response.body.recording_id);
+    client.log("Task ID: " + response.body.task_id);
+%}
+
+### 2.2 重复上传同一文件（测试幂等性 - 应返回已存在的录音）
+POST {{apiUrl}}/v1/recordings
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
+
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="file"; filename="test-audio.mp3"
+Content-Type: audio/mpeg
+
+< ./uploads/test-audio.mp3
+------WebKitFormBoundary7MA4YWxkTrZu0gW--
+
+> {%
+    client.test("Should return is_duplicate=true", function() {
+        client.assert(response.body.is_duplicate === true, "Expected duplicate flag");
+    });
+%}
+
+### 2.3 强制重新处理（force_reprocess=true）
+POST {{apiUrl}}/v1/recordings
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
+
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="file"; filename="test-audio.mp3"
+Content-Type: audio/mpeg
+
+< ./uploads/test-audio.mp3
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="force_reprocess"
+
+true
+------WebKitFormBoundary7MA4YWxkTrZu0gW--
+
+> {%
+    client.test("Should create new recording", function() {
+        client.assert(response.body.is_duplicate === false, "Expected new recording");
+    });
+    client.global.set("recordingId", response.body.recording_id);
+    client.global.set("taskId", response.body.task_id);
+%}
+
+###############################################################################
+### 3. 查询录音
+###############################################################################
+
+### 3.1 获取录音详情
+GET {{apiUrl}}/v1/recordings/{{recordingId}}
+Accept: application/json
+
+### 3.2 获取录音列表（第1页，默认20条/页）
+GET {{apiUrl}}/v1/recordings?page=1&page_size=20
+Accept: application/json
+
+### 3.3 获取录音列表（第2页）
+GET {{apiUrl}}/v1/recordings?page=2&page_size=20
+Accept: application/json
+
+### 3.4 获取录音列表（自定义分页 - 每页10条）
+GET {{apiUrl}}/v1/recordings?page=1&page_size=10
+Accept: application/json
+
+###############################################################################
+### 4. 任务查询
+###############################################################################
+
+### 4.1 查询任务详情
+GET {{apiUrl}}/v1/tasks/{{taskId}}
+Accept: application/json
+
+### 4.2 查询任务列表（所有任务）
+GET {{apiUrl}}/v1/tasks?page=1&page_size=20
+Accept: application/json
+
+### 4.3 按状态筛选任务（pending）
+GET {{apiUrl}}/v1/tasks?status=pending&page=1&page_size=20
+Accept: application/json
+
+### 4.4 按状态筛选任务（done）
+GET {{apiUrl}}/v1/tasks?status=done&page=1&page_size=20
+Accept: application/json
+
+### 4.5 按状态筛选任务（failed）
+GET {{apiUrl}}/v1/tasks?status=failed&page=1&page_size=20
+Accept: application/json
+
+###############################################################################
+### 5. 任务重试
+###############################################################################
+
+### 5.1 重试失败的任务
+POST {{apiUrl}}/v1/tasks/{{taskId}}/retry
+Content-Type: application/json
+
+###############################################################################
+### 6. 删除操作
+###############################################################################
+
+### 6.1 删除录音（会级联删除关联的任务）
+DELETE {{apiUrl}}/v1/recordings/{{recordingId}}
+
+###############################################################################
+### 7. 错误场景测试
+###############################################################################
+
+### 7.1 上传不支持的文件格式（应返回 400）
+POST {{apiUrl}}/v1/recordings
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
+
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="file"; filename="test.txt"
+Content-Type: text/plain
+
+This is not an audio file
+------WebKitFormBoundary7MA4YWxkTrZu0gW--
+
+### 7.2 查询不存在的录音（应返回 404）
+GET {{apiUrl}}/v1/recordings/00000000-0000-0000-0000-000000000000
+Accept: application/json
+
+### 7.3 查询不存在的任务（应返回 404）
+GET {{apiUrl}}/v1/tasks/00000000-0000-0000-0000-000000000000
+Accept: application/json
+
+### 7.4 无效的分页参数（page=0，应返回 422）
+GET {{apiUrl}}/v1/recordings?page=0&page_size=20
+Accept: application/json
+
+### 7.5 无效的分页参数（page_size=0，应返回 422）
+GET {{apiUrl}}/v1/recordings?page=1&page_size=0
+Accept: application/json
+
+### 7.6 无效的分页参数（page_size>100，应返回 422）
+GET {{apiUrl}}/v1/recordings?page=1&page_size=101
+Accept: application/json
+
+###############################################################################
+### 8. API 文档
+###############################################################################
+
+### 8.1 访问 Swagger UI
+GET {{apiUrl}}/docs
+
+### 8.2 访问 ReDoc
+GET {{apiUrl}}/redoc
+
+### 8.3 获取 OpenAPI Schema
+GET {{apiUrl}}/openapi.json
+Accept: application/json
+
+###############################################################################
+### 使用说明
+###############################################################################
+
+# 1. 安装 VS Code REST Client 插件或使用 IntelliJ HTTP Client
+# 2. 修改顶部的 @apiUrl 变量选择环境（本地或生产）
+# 3. 确保有测试音频文件在 ./uploads/test-audio.mp3
+# 4. 按顺序执行测试用例（从上到下）
+# 5. 某些测试依赖前面的响应（如 recordingId、taskId 会自动提取）
+
+###############################################################################
+### 测试流程建议
+###############################################################################
+
+# 完整测试流程：
+# 1. 健康检查 (1.1)
+# 2. 首次上传 (2.1) → 获取 recordingId 和 taskId
+# 3. 重复上传测试幂等性 (2.2)
+# 4. 查询录音详情 (3.1)
+# 5. 查询录音列表 (3.2-3.4)
+# 6. 查询任务详情 (4.1)
+# 7. 查询任务列表 (4.2-4.5)
+# 8. 等待任务完成后再次查询详情，验证转写和摘要结果
+# 9. 测试错误场景 (7.1-7.6)
+# 10. 清理：删除测试数据 (6.1)
