@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Response
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Response, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -23,6 +23,7 @@ from app.schemas import (
 from app.config import settings
 from app.services.task_processor import schedule_task
 from app.api.utils import get_or_404
+from app.utils import calculate_file_hash
 
 router = APIRouter(prefix="/v1/recordings", tags=["recordings"])
 logger = logging.getLogger(__name__)
@@ -161,14 +162,22 @@ async def list_recordings(
 )
 async def upload_recording(
     file: UploadFile = File(...),
+    force_reprocess: bool = Form(False),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Upload an audio file for transcription and summarization.
 
     - **file**: Audio file (wav/mp3/m4a/aac, max 50MB)
+    - **force_reprocess**: If true, force create new recording even if duplicate (optional, default false)
 
-    Returns recording_id, task_id, and status.
+    Returns recording_id, task_id, status, and is_duplicate flag.
+
+    Duplicate detection:
+    - Calculates SHA256 hash of file content
+    - If hash exists and force_reprocess=false, returns existing recording with latest task
+    - If hash exists and force_reprocess=true, creates new recording
+    - Sets is_duplicate=true when returning existing recording
     """
     # Validate file extension
     file_ext = Path(file.filename).suffix.lower()
@@ -205,6 +214,56 @@ async def upload_recording(
             }
         )
 
+    # Calculate file hash for deduplication
+    file_hash = calculate_file_hash(content)
+
+    # Check for existing recording with same hash (unless force_reprocess)
+    if not force_reprocess:
+        existing_result = await db.execute(
+            select(Recording)
+            .where(Recording.file_hash == file_hash)
+        )
+        existing_recording = existing_result.scalar_one_or_none()
+
+        if existing_recording:
+            # Find latest task for this recording
+            latest_task_result = await db.execute(
+                select(Task)
+                .where(Task.recording_id == existing_recording.id)
+                .order_by(Task.created_at.desc())
+                .limit(1)
+            )
+            latest_task = latest_task_result.scalar_one_or_none()
+
+            # If no task exists, create a new one
+            if not latest_task:
+                latest_task = Task(
+                    recording_id=existing_recording.id,
+                    status="pending"
+                )
+                db.add(latest_task)
+                await db.commit()
+                await db.refresh(latest_task)
+
+                # Schedule the new task
+                try:
+                    schedule_task(latest_task.id)
+                except Exception as e:
+                    logger.error(f"Failed to schedule task {latest_task.id}: {e}")
+
+            logger.info(
+                f"Duplicate upload detected: file_hash={file_hash}, "
+                f"recording_id={existing_recording.id}, task_id={latest_task.id}"
+            )
+
+            return RecordingUploadResponse(
+                recording_id=existing_recording.id,
+                task_id=latest_task.id,
+                status=latest_task.status,
+                is_duplicate=True
+            )
+
+    # No duplicate or force_reprocess=true, create new recording
     # Create uploads directory if not exists
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -244,7 +303,7 @@ async def upload_recording(
         file_path=relative_path,
         file_size=file_size,
         mime_type=mime_type,
-        file_hash=str(file_id)  # Temporary: use UUID as hash, real hash implementation in future issue
+        file_hash=file_hash
     )
 
     # Create Task record
@@ -281,10 +340,10 @@ async def upload_recording(
 
     logger.info(
         f"Recording uploaded: recording_id={recording.id}, "
-        f"filename={file.filename}, file_size={file_size}"
+        f"filename={file.filename}, file_size={file_size}, file_hash={file_hash}"
     )
 
-    # P2-5: Schedule background task processing with error handling
+    # Schedule background task processing with error handling
     try:
         schedule_task(task.id)
     except Exception as e:
