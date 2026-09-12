@@ -2,9 +2,12 @@ from datetime import datetime
 from contextlib import asynccontextmanager
 import asyncio
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy import text
 
 from app.database import AsyncSessionLocal
@@ -75,6 +78,11 @@ app.add_middleware(
 app.include_router(recordings.router)
 app.include_router(tasks.router, prefix="/v1/tasks", tags=["tasks"])
 
+# Mount static files for frontend
+frontend_dir = Path(__file__).parent.parent / "frontend"
+if frontend_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(frontend_dir)), name="static")
+
 
 @app.get("/health")
 async def health_check(response: Response):
@@ -102,7 +110,12 @@ async def health_check(response: Response):
 
 @app.get("/")
 async def root():
-    """Root endpoint."""
+    """Serve frontend index page."""
+    frontend_file = Path(__file__).parent.parent / "frontend" / "index.html"
+    if frontend_file.exists():
+        return FileResponse(str(frontend_file))
+
+    # Fallback if frontend not found
     return {
         "service": "AudioInsight",
         "version": "0.1.0",
