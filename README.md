@@ -34,9 +34,9 @@ AudioInsight 是一个现代化的音频处理服务，旨在简化音频转写�
 
 ## 🌐 在线演示
 
-- **前端界面**: https://audioinsight-production.up.railway.app
-- **API 文档**: https://audioinsight-production.up.railway.app/docs
-- **健康检查**: https://audioinsight-production.up.railway.app/health
+- **前端界面**: https://audioinsight-production-b048.up.railway.app/
+- **API 文档**: https://audioinsight-production-b048.up.railway.app/docs
+- **健康检查**: https://audioinsight-production-b048.up.railway.app/health
 
 ## 🚀 核心功能
 
@@ -589,6 +589,6 @@ AudioInsight Team - 2026
 
 ---
 
-**部署地址**: https://audioinsight-production.up.railway.app
+**部署地址**: https://audioinsight-production-b048.up.railway.app
 
 **文档更新日期**: 2026-09-12

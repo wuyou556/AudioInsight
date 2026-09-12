@@ -1,6 +1,13 @@
 ### AudioInsight API 测试文件
 ### 使用 VS Code REST Client 插件或 IntelliJ HTTP Client 运行
 
+### ⚠️ 使用说明
+### 本文件推荐用 IntelliJ HTTP Client 打开（支持自动提取变量）。
+### 如果用 VS Code REST Client：
+###   - 自动提取变量不生效，需手动把 {{recordingId}}、{{taskId}} 换成真实 UUID
+###   - 或只测试不依赖变量的接口（健康检查、列表）
+### 请求需按顺序执行。
+
 ### 环境变量配置
 @baseUrl = http://localhost:8000
 @productionUrl = https://audioinsight-production-b048.up.railway.app
@@ -62,34 +69,12 @@ Content-Type: audio/mpeg
     });
 %}
 
-### 2.3 强制重新处理（force_reprocess=true）
-POST {{apiUrl}}/v1/recordings
-Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
-
-------WebKitFormBoundary7MA4YWxkTrZu0gW
-Content-Disposition: form-data; name="file"; filename="test-audio.mp3"
-Content-Type: audio/mpeg
-
-< ./uploads/test-audio.mp3
-------WebKitFormBoundary7MA4YWxkTrZu0gW
-Content-Disposition: form-data; name="force_reprocess"
-
-true
-------WebKitFormBoundary7MA4YWxkTrZu0gW--
-
-> {%
-    client.test("Should create new recording", function() {
-        client.assert(response.body.is_duplicate === false, "Expected new recording");
-    });
-    client.global.set("recordingId", response.body.recording_id);
-    client.global.set("taskId", response.body.task_id);
-%}
-
 ###############################################################################
 ### 3. 查询录音
 ###############################################################################
 
 ### 3.1 获取录音详情
+
 GET {{apiUrl}}/v1/recordings/{{recordingId}}
 Accept: application/json
 
@@ -110,23 +95,8 @@ Accept: application/json
 ###############################################################################
 
 ### 4.1 查询任务详情
+
 GET {{apiUrl}}/v1/tasks/{{taskId}}
-Accept: application/json
-
-### 4.2 查询任务列表（所有任务）
-GET {{apiUrl}}/v1/tasks?page=1&page_size=20
-Accept: application/json
-
-### 4.3 按状态筛选任务（pending）
-GET {{apiUrl}}/v1/tasks?status=pending&page=1&page_size=20
-Accept: application/json
-
-### 4.4 按状态筛选任务（done）
-GET {{apiUrl}}/v1/tasks?status=done&page=1&page_size=20
-Accept: application/json
-
-### 4.5 按状态筛选任务（failed）
-GET {{apiUrl}}/v1/tasks?status=failed&page=1&page_size=20
 Accept: application/json
 
 ###############################################################################
@@ -214,7 +184,6 @@ Accept: application/json
 # 4. 查询录音详情 (3.1)
 # 5. 查询录音列表 (3.2-3.4)
 # 6. 查询任务详情 (4.1)
-# 7. 查询任务列表 (4.2-4.5)
-# 8. 等待任务完成后再次查询详情，验证转写和摘要结果
-# 9. 测试错误场景 (7.1-7.6)
-# 10. 清理：删除测试数据 (6.1)
+# 7. 等待任务完成后再次查询详情，验证转写和摘要结果
+# 8. 测试错误场景 (7.1-7.6)
+# 9. 清理：删除测试数据 (6.1)
