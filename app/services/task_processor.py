@@ -252,32 +252,30 @@ async def recover_tasks_on_startup() -> dict:
     """
     Recover incomplete tasks on service startup.
 
-    Detects and resets zombie tasks (stuck in processing states for too long),
-    then reschedules all pending tasks.
+    Resets all interrupted tasks (in processing states) to pending,
+    then reschedules all pending tasks. Service restart means all
+    processing workers are gone, so all in-progress tasks need to restart.
 
     Returns:
         dict: Statistics about recovered tasks
-            - zombie_reset: number of zombie tasks reset to pending
+            - interrupted_reset: number of interrupted tasks reset to pending
             - pending_recovered: number of pending tasks rescheduled
     """
-    zombie_reset = 0
+    interrupted_reset = 0
     pending_recovered = 0
 
     try:
         async with AsyncSessionLocal() as db:
-            # Calculate zombie task cutoff time
-            zombie_cutoff = datetime.utcnow() - timedelta(seconds=settings.zombie_task_timeout)
-
-            # Find zombie tasks (stuck in processing states)
-            zombie_query = select(Task).where(
-                Task.status.in_(['transcribing', 'summarizing']),
-                Task.updated_at < zombie_cutoff
+            # Find all interrupted tasks (in processing states)
+            # Service restart means these workers no longer exist
+            interrupted_query = select(Task).where(
+                Task.status.in_(['transcribing', 'summarizing'])
             )
-            zombie_result = await db.execute(zombie_query)
-            zombie_tasks = zombie_result.scalars().all()
+            interrupted_result = await db.execute(interrupted_query)
+            interrupted_tasks = interrupted_result.scalars().all()
 
-            # Reset zombie tasks to pending
-            for task in zombie_tasks:
+            # Reset interrupted tasks to pending
+            for task in interrupted_tasks:
                 old_status = task.status
                 old_updated_at = task.updated_at
 
@@ -286,24 +284,24 @@ async def recover_tasks_on_startup() -> dict:
                 task.error_message = None  # Clear old error messages
                 # Don't manually set updated_at - let SQLAlchemy's onupdate handle it
 
-                zombie_reset += 1
+                interrupted_reset += 1
                 logger.warning(
-                    f"Reset zombie task {task.id} from {old_status} state "
-                    f"(stuck since: {old_updated_at})"
+                    f"Reset interrupted task {task.id} from {old_status} state "
+                    f"(last updated: {old_updated_at})"
                 )
 
-            if zombie_reset > 0:
+            if interrupted_reset > 0:
                 try:
                     await db.commit()
-                    logger.info(f"Reset {zombie_reset} zombie tasks to pending")
+                    logger.info(f"Reset {interrupted_reset} interrupted tasks to pending")
                 except Exception as commit_error:
-                    logger.error(f"Failed to commit zombie task resets: {commit_error}")
+                    logger.error(f"Failed to commit interrupted task resets: {commit_error}")
                     await db.rollback()
                     # Reset counter since commit failed
-                    zombie_reset = 0
+                    interrupted_reset = 0
                     # Don't continue to scheduling if reset failed
                     return {
-                        'zombie_reset': 0,
+                        'interrupted_reset': 0,
                         'pending_recovered': 0
                     }
 
@@ -333,13 +331,13 @@ async def recover_tasks_on_startup() -> dict:
 
             logger.info(
                 f"Task recovery complete: recovered {pending_recovered} pending tasks, "
-                f"reset {zombie_reset} zombie tasks"
+                f"reset {interrupted_reset} interrupted tasks"
             )
 
     except Exception as e:
         logger.error(f"Error during task recovery: {e}", exc_info=True)
 
     return {
-        'zombie_reset': zombie_reset,
+        'interrupted_reset': interrupted_reset,
         'pending_recovered': pending_recovered
     }
