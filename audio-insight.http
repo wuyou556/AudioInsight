@@ -3,7 +3,7 @@
 
 ### 环境变量配置
 @baseUrl = http://localhost:8000
-@productionUrl = https://audioinsight-production.up.railway.app
+@productionUrl = https://audioinsight-production-b048.up.railway.app
 
 # 使用本地环境
 # @apiUrl = {{baseUrl}}
